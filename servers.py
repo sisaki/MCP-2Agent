@@ -4,7 +4,7 @@ import requests
 from fastapi import FastAPI
 from pydantic import BaseModel
 from dotenv import load_dotenv
-from openai import OpenAI
+import google.generativeai as genai
 from common import confidence_from_text
 
 load_dotenv()
@@ -47,7 +47,8 @@ def search_rpc(req: RPC):
 
 # Summary Server
 summary_app = FastAPI()
-summary_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+summary_client = genai.GenerativeModel('gemini-2.5-flash')
 
 
 @summary_app.post("/rpc")
@@ -57,19 +58,15 @@ def summary_rpc(req: RPC):
 
     if req.method == "summarize":
         docs = "\n".join(req.params["documents"])
-        response = summary_client.chat.completions.create(
-            model="gpt-4.1-nano",
-            messages=[
-                {"role": "system", "content": "You are a helpful assistant that summarizes documents concisely."},
-                {"role": "user", "content": f"Summarize:\n{docs}"}
-            ]
-        )
-        text = response.choices[0].message.content
+        system_prompt = "You are a helpful assistant that summarizes documents concisely."
+        prompt = f"{system_prompt}\n\nSummarize:\n{docs}"
+        response = summary_client.generate_content(prompt)
+        text = response.text
         return {
             "result": {
                 "text": text,
                 "confidence": confidence_from_text(text),
-                "source": "gpt-4.1-nano"
+                "source": "gemini-2.5-flash"
             },
             "id": req.id
         }

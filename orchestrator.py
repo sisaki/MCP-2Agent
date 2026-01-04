@@ -3,12 +3,13 @@ import csv
 import os
 import json
 from dotenv import load_dotenv
-from openai import OpenAI
+import google.generativeai as genai
 from concurrent.futures import ThreadPoolExecutor
 from common import SearchClient, SummaryClient
 
 load_dotenv()
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+client = genai.GenerativeModel('gemini-2.5-flash')
 
 STATE_FILE = "state.csv"
 
@@ -28,7 +29,7 @@ summary_client = SummaryClient()
 # LLM Planning Functions
 def detect_intent_with_llm(query, history=None):
     """
-    Use LLM (GPT-4.1-nano) to analyze user query and detect intent.
+    Use LLM (Gemini 2.5 Flash) to analyze user query and detect intent.
     
     Args:
         query: The user's query
@@ -57,15 +58,10 @@ Respond with ONLY one word: search, summarize, or conversation_query
 """
     
     try:
-        response = client.chat.completions.create(
-            model="gpt-4.1-nano",
-            messages=[
-                {"role": "system", "content": "You are a helpful assistant that analyzes user queries to determine intent. Always respond with exactly one word: search, summarize, or conversation_query."},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.3
-        )
-        text = response.choices[0].message.content.strip().lower()
+        system_prompt = "You are a helpful assistant that analyzes user queries to determine intent. Always respond with exactly one word: search, summarize, or conversation_query."
+        full_prompt = f"{system_prompt}\n\n{prompt}"
+        response = client.generate_content(full_prompt)
+        text = response.text.strip().lower()
         
         valid_intents = ["search", "summarize", "conversation_query"]
         for intent in valid_intents:
@@ -80,7 +76,7 @@ Respond with ONLY one word: search, summarize, or conversation_query
 
 def plan_execution_stages(query, intent, current_state=None, history=None):
     """
-    Use LLM (GPT-4.1-nano) to plan which execution stages should run.
+    Use LLM (Gemini 2.5 Flash) to plan which execution stages should run.
     
     Args:
         query: The user's query
@@ -135,15 +131,10 @@ Respond with ONLY a JSON array of stage names, e.g., ["search"] or ["search", "s
 """
     
     try:
-        response = client.chat.completions.create(
-            model="gpt-4.1-nano",
-            messages=[
-                {"role": "system", "content": "You are a planning agent. Always respond with a valid JSON array of stage names. Example: [\"search\"] or [\"search\", \"summarize\"]. Do not execute more stages than necessary."},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.2
-        )
-        text = response.choices[0].message.content.strip()
+        system_prompt = "You are a planning agent. Always respond with a valid JSON array of stage names. Example: [\"search\"] or [\"search\", \"summarize\"]. Do not execute more stages than necessary."
+        full_prompt = f"{system_prompt}\n\n{prompt}"
+        response = client.generate_content(full_prompt)
+        text = response.text.strip()
         
         if "```" in text:
             text = text.split("```")[1]
@@ -184,14 +175,10 @@ User intent: {user_intent}
 Return JSON list of required states:
 INIT, SEARCHED, SUMMARIZED, REVIEWED, INSIGHTED
 """
-    response = client.chat.completions.create(
-        model="gpt-4.1-nano",
-        messages=[
-            {"role": "system", "content": "You are a helpful assistant that returns JSON responses."},
-            {"role": "user", "content": prompt}
-        ]
-    )
-    text = response.choices[0].message.content.strip()
+    system_prompt = "You are a helpful assistant that returns JSON responses."
+    full_prompt = f"{system_prompt}\n\n{prompt}"
+    response = client.generate_content(full_prompt)
+    text = response.text.strip()
     if "```" in text:
         text = text.split("```")[1]
         if text.startswith("json"):
@@ -236,12 +223,12 @@ def parallel_insights(context, insights_client):
 def load_rows():
     if not os.path.exists(STATE_FILE):
         return []
-    with open(STATE_FILE) as f:
+    with open(STATE_FILE, encoding='utf-8') as f:
         return list(csv.DictReader(f))
 
 
 def save_rows(rows):
-    with open(STATE_FILE, "w", newline="") as f:
+    with open(STATE_FILE, "w", newline="", encoding='utf-8') as f:
         w = csv.DictWriter(f, fieldnames=FIELDS)
         w.writeheader()
         # Only write fields that are in FIELDS
@@ -251,7 +238,7 @@ def save_rows(rows):
 
 def detect_intent(query, history=None):
     """
-    Detect user intent from query using LLM (GPT-4.1-nano).
+    Detect user intent from query using LLM (Gemini 2.5 Flash).
     The LLM analyzes the user query and determines the appropriate intent.
     """
     return detect_intent_with_llm(query, history)
@@ -383,15 +370,10 @@ Provide a helpful and concise answer based on the conversation history. If the q
 """
     
     try:
-        response = client.chat.completions.create(
-            model="gpt-4.1-nano",
-            messages=[
-                {"role": "system", "content": "You are a helpful assistant that answers questions about previous conversations. Use the conversation history to provide accurate and helpful responses."},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.3
-        )
-        text = response.choices[0].message.content.strip()
+        system_prompt = "You are a helpful assistant that answers questions about previous conversations. Use the conversation history to provide accurate and helpful responses."
+        full_prompt = f"{system_prompt}\n\n{prompt}"
+        response = client.generate_content(full_prompt)
+        text = response.text.strip()
         
         # Calculate confidence based on response length
         from common import confidence_from_text
