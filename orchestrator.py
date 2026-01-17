@@ -290,59 +290,7 @@ def get_or_create_row(query, intent=None):
     return row, rows
 
 
-def execute_search(query, row):
-    """Execute search stage using MCP client"""
-    if row.get("search_results"):
-        return row
-    
-    r = search_client.search(query)
-    row["search_results"] = r["text"]
-    row["search_confidence"] = str(r["confidence"])
-    return row
 
-
-def execute_summarize(row):
-    """Execute summarize stage - summarizes last 3 agent responses"""
-    if row.get("summary"):
-        return row
-    
-    # Get all rows to find last 3 agent responses
-    rows = load_rows()
-    
-    # Get last 3 rows that have either search_results or summaries (agent responses)
-    # These are rows that represent actual agent outputs (not just conversation queries)
-    rows_with_content = [r for r in rows if r.get("search_results", "").strip() or r.get("summary", "").strip()]
-    if len(rows_with_content) == 0:
-        raise ValueError("Cannot summarize: no previous agent responses available. Please have some conversations first.")
-    
-    # Sort by turn number (oldest to newest) and get the last 3 most recent responses
-    sorted_rows = sorted(rows_with_content, key=lambda x: int(x.get("turn", "0")), reverse=False)
-    last_3_summaries = sorted_rows[-3:]
-    
-    # Extract text from search_results or summaries for display
-    messages_to_summarize = []
-    summary_texts = []
-    for r in last_3_summaries:
-        # Use summary if available, otherwise use search_results
-        content = r.get("summary", "") or r.get("search_results", "")
-        summary_texts.append(content)
-        messages_to_summarize.append({
-            "query": r.get("query", ""),
-            "summary": content[:200] + "..." if len(content) > 200 else content,
-            "turn": r.get("turn", "")
-        })
-    
-    # Save the actual messages being summarized for UI
-    row["_summarizing_messages"] = messages_to_summarize
-    
-    # Combine the content for summarization
-    combined_text = "\n\n".join([f"Response {i+1}: {text}" for i, text in enumerate(summary_texts)])
-    
-    # Summarize the combined text
-    r = summary_client.summarize([combined_text])
-    row["summary"] = r["text"]
-    row["summary_confidence"] = str(r["confidence"])
-    return row
 
 
 def generate_conversation_response(query, history):
@@ -461,12 +409,47 @@ def orchestrate(query, intent=None):
     summarizing_messages = None
     for stage in planned_stages:
         if stage == "search":
-            row = execute_search(query, row)
+            # Call MCP search server directly
+            if not row.get("search_results"):
+                r = search_client.search(query)
+                row["search_results"] = r["text"]
+                row["search_confidence"] = str(r["confidence"])
             executed_stages.append("search")
         elif stage == "summarize":
-            row = execute_summarize(row)
+            # Call MCP summarize server directly
+            if not row.get("summary"):
+                # Get all rows to find last 3 agent responses
+                all_rows = load_rows()
+                rows_with_content = [r for r in all_rows if r.get("search_results", "").strip() or r.get("summary", "").strip()]
+                
+                if len(rows_with_content) == 0:
+                    raise ValueError("Cannot summarize: no previous agent responses available. Please have some conversations first.")
+                
+                # Get last 3 most recent agent responses
+                sorted_rows = sorted(rows_with_content, key=lambda x: int(x.get("turn", "0")), reverse=False)
+                last_3_summaries = sorted_rows[-3:]
+                
+                # Prepare messages for display and summarization
+                messages_to_summarize = []
+                summary_texts = []
+                for r in last_3_summaries:
+                    content = r.get("summary", "") or r.get("search_results", "")
+                    summary_texts.append(content)
+                    messages_to_summarize.append({
+                        "query": r.get("query", ""),
+                        "summary": content[:200] + "..." if len(content) > 200 else content,
+                        "turn": r.get("turn", "")
+                    })
+                
+                row["_summarizing_messages"] = messages_to_summarize
+                
+                # Call MCP summarize server with combined text
+                combined_text = "\n\n".join([f"Response {i+1}: {text}" for i, text in enumerate(summary_texts)])
+                r = summary_client.summarize([combined_text])
+                row["summary"] = r["text"]
+                row["summary_confidence"] = str(r["confidence"])
+            
             executed_stages.append("summary")
-            # Capture the messages being summarized for UI
             summarizing_messages = row.get("_summarizing_messages")
     
     updated = False

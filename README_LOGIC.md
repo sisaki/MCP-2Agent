@@ -94,28 +94,50 @@ Orchestrator → plan_execution_stages(query, intent, current_state, history)
 
 ### 6. Stage Execution (Orchestrator)
 
+The `orchestrate()` function directly calls MCP clients inline for each planned stage:
+
 #### Search Stage
-```
+```python
 if stage == "search":
-    → SearchClient.search(query)
-    → HTTP POST to Search MCP Server (:8001)
-    → Search Server calls Serper API
-    → Returns search results with confidence
+    if not row.get("search_results"):
+        r = search_client.search(query)  # Direct MCP client call
+        row["search_results"] = r["text"]
+        row["search_confidence"] = str(r["confidence"])
+    executed_stages.append("search")
 ```
+
+**Flow:**
+1. Call `search_client.search(query)` directly
+2. HTTP POST to Search MCP Server (:8001)
+3. Search Server calls Serper API
+4. Returns search results with confidence
 
 #### Summarize Stage
-```
+```python
 if stage == "summarize":
-    → Load all rows from state.csv
-    → Find last 3 rows with summaries (agent responses)
-    → Combine those 3 summaries
-    → SummaryClient.summarize(combined_text)
-    → HTTP POST to Summary MCP Server (:8002)
-    → Summary Server calls OpenAI GPT-4.1-nano
-    → Returns summary of last 3 agent responses
+    if not row.get("summary"):
+        all_rows = load_rows()
+        rows_with_content = [r for r in all_rows if r.get("search_results", "").strip() or r.get("summary", "").strip()]
+        sorted_rows = sorted(rows_with_content, key=lambda x: int(x.get("turn", "0")), reverse=False)
+        last_3_summaries = sorted_rows[-3:]
+        # Prepare messages and combine text
+        combined_text = "\n\n".join([f"Response {i+1}: {text}" for i, text in enumerate(summary_texts)])
+        r = summary_client.summarize([combined_text])  # Direct MCP client call
+        row["summary"] = r["text"]
+        row["summary_confidence"] = str(r["confidence"])
+    executed_stages.append("summary")
 ```
 
-**Important**: Summarize now summarizes the last 3 agent responses from conversation history, NOT search results.
+**Flow:**
+1. Load all rows from state.csv
+2. Find last 3 rows with agent responses (search results or summaries)
+3. Combine those 3 responses
+4. Call `summary_client.summarize(combined_text)` directly
+5. HTTP POST to Summary MCP Server (:8002)
+6. Summary Server calls OpenAI GPT-4.1-nano
+7. Returns summary of last 3 agent responses
+
+**Important**: Summarize now summarizes the last 3 agent responses from conversation history, NOT search results. MCP client calls are inlined directly in the orchestration loop.
 
 #### Conversation Query Stage
 ```
@@ -171,9 +193,10 @@ Orchestrator → Adds metadata (_executed_stages, _planned_stages)
   - Calls intent detection with context
   - Loads/saves state
   - Calls planner with context
-  - Executes planned stages via MCP clients
+  - **Directly calls MCP clients inline** for each planned stage (no wrapper functions)
   - Handles conversation queries separately
   - Tracks executed stages
+- **Architecture**: MCP client calls are inlined directly in the `orchestrate()` function's stage execution loop for simplicity
 
 ### MCP Clients (`common.py`)
 - **SearchClient**: Wraps search server communication

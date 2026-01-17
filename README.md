@@ -178,10 +178,10 @@ The orchestrator is the brain of the system. It manages the entire flow:
   - Function: `detect_intent_with_llm(query, history)` - Uses GPT-4.1-nano with conversation context
 - **Execution Planning**: Uses LLM to decide which stages to execute
   - Function: `plan_execution_stages(query, intent, current_state, history)` - Plans minimal execution
-- **Stage Execution**: Executes the planned stages
-  - `execute_search(query, row)` - Calls SearchClient for web search
-  - `execute_summarize(row)` - Calls SummaryClient to summarize last 3 most recent agent responses
-  - `generate_conversation_response(query, history)` - Handles conversation queries
+- **Stage Execution**: Directly calls MCP clients inline within the orchestration loop
+  - For search: Directly calls `search_client.search(query)` via MCP
+  - For summarize: Directly calls `summary_client.summarize()` via MCP, processes last 3 agent responses
+  - For conversation queries: Calls `generate_conversation_response(query, history)` - Handles conversation queries
 - **State Management**: Loads and saves conversation history
   - `load_rows()` - Loads state.csv
   - `save_rows(rows)` - Persists state to CSV
@@ -191,6 +191,7 @@ The orchestrator is the brain of the system. It manages the entire flow:
 **Key Features:**
 - Gets last 5 messages for LLM context
 - Only executes minimum required stages
+- Direct MCP client calls inline (no wrapper functions)
 - Properly identifies last 3 most recent agent responses for summarization
 - Returns structured response with metadata
 
@@ -257,7 +258,13 @@ The MCP servers expose JSON-RPC endpoints that handle actual operations:
 
 ## Recent Updates
 
-### Summarization Improvements (Latest)
+### Code Refactoring (Latest)
+- **Removed Helper Functions**: `execute_search()` and `execute_summarize()` functions removed
+- **Direct MCP Client Calls**: MCP client calls now inlined directly in `orchestrate()` function
+- **Simplified Architecture**: Reduced function abstraction layers while maintaining functionality
+- **Maintained All Features**: All original functionality preserved, just simplified code structure
+
+### Summarization Improvements
 - **Smart Message Selection**: Now correctly identifies and summarizes the last 3 most recent agent responses (by turn number)
 - **Flexible Content**: Includes both search results and previous summaries (whichever are more recent)
 - **UI Transparency**: Displays the exact messages being summarized before showing the final summary
